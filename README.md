@@ -1,1 +1,0 @@
-# btd-soft-ranking
