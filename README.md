@@ -1,9 +1,9 @@
-# Heterogeneity Adaptive Design & Sequential Estimation  
+# Adaptive Design & Sequential Estimation for Heterogeneous Data
 *(Bradley–Terry–Davidson Model)*
 
 This repository contains code associated with the paper:
 
-> **"Heterogeneity Adaptive Design and Sequential Estimation with an Application to Bradley–Terry–Davidson Models"**  
+> **"Adaptive Design and Sequential Estimation for Heterogeneous Data with an Application to Bradley–Terry–Davidson Models"**  
 
 **Key points:**
 - *Adaptive sampling* strategies (optimal design, uniform, uncertainty sampling).
