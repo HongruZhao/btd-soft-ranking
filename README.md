@@ -18,4 +18,4 @@ This repository contains code associated with the paper:
 4. **Run**:
    ```r
    source("R/basic_functions.R")  # core functions
-   source("R/simulation_1.R")     # or simulation_2.R
+   source("R/simulation_1.R")     # or simulation_2.R, simulation_3_1.R, simulation_3_2.R
