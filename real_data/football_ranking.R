@@ -58,7 +58,6 @@ if (nzchar(total_samples_override)) {
 }
 
 MASTER_SEED <- 3077L
-N_PLOT_INITIAL <- 20L
 set.seed(MASTER_SEED)
 
 script_start_time <- proc.time()
@@ -404,7 +403,6 @@ results_recent <- raw_results[recent_idx, , drop = FALSE]
 
 # Target tournaments (indices 1-10, 15,16,17,19,21 from summary)
 target_tournaments <- c(
-  "Friendly",
   "FIFA World Cup qualification",
   "UEFA Euro qualification",
   "African Cup of Nations qualification",
@@ -884,21 +882,14 @@ simulate_strategy <- function(
     }
   }
   metrics_length <- total_samples - n_init + 1
-  mse_vec <- numeric(metrics_length)
-  hsr_vec <- numeric(metrics_length)
   tau_vec <- numeric(metrics_length)
-  compute_metrics <- function(par_est) {
+  compute_tau <- function(par_est) {
     theta_est <- par_est[1:p]
     phi_est <- par_est[(p + 1):(p + k_B)]
-    mse_val <- mean((theta_est - theta_global)^2)
-    hsr_val <- hetero_soft_ranking_loss(theta_est, theta_global, phi_est, phi_global, delta = soft_delta, eta = soft_eta)
     tau_val <- suppressWarnings(cor(theta_est, theta_global, method = "kendall"))
-    c(mse_val, hsr_val, tau_val)
+    tau_val
   }
-  initial_metrics <- compute_metrics(par_current)
-  mse_vec[1] <- initial_metrics[1]
-  hsr_vec[1] <- initial_metrics[2]
-  tau_vec[1] <- initial_metrics[3]
+  tau_vec[1] <- compute_tau(par_current)
   current_total <- n_init
   for (step_idx in 2:metrics_length) {
     # select tournament
@@ -970,14 +961,9 @@ simulate_strategy <- function(
       verbose = FALSE
     )
     par_current <- fit_res$solution
-    metrics_vals <- compute_metrics(par_current)
-    mse_vec[step_idx] <- metrics_vals[1]
-    hsr_vec[step_idx] <- metrics_vals[2]
-    tau_vec[step_idx] <- metrics_vals[3]
+    tau_vec[step_idx] <- compute_tau(par_current)
   }
   list(
-    mse = mse_vec,
-    hsr = hsr_vec,
     tau = tau_vec,
     final_par = par_current
   )
@@ -1056,8 +1042,6 @@ mc_reps <- MC_REPS
 metrics_len <- total_samples_target - nrow(df_initial) + 1
 strategy_results <- lapply(strategies, function(x) {
   list(
-    mse = matrix(0, nrow = mc_reps, ncol = metrics_len),
-    hsr = matrix(0, nrow = mc_reps, ncol = metrics_len),
     tau = matrix(0, nrow = mc_reps, ncol = metrics_len)
   )
 })
@@ -1084,8 +1068,6 @@ for (rep_idx in seq_len(mc_reps)) {
       verbose = FALSE,
       with_replacement = WITH_REPLACEMENT
     )
-    strategy_results[[strategy_name]]$mse[rep_idx, ] <- sim_res$mse
-    strategy_results[[strategy_name]]$hsr[rep_idx, ] <- sim_res$hsr
     strategy_results[[strategy_name]]$tau[rep_idx, ] <- sim_res$tau
   }
 }
@@ -1093,49 +1075,42 @@ for (rep_idx in seq_len(mc_reps)) {
 sample_sizes <- seq(nrow(df_initial), total_samples_target)
 strategy_means <- lapply(strategy_results, function(res) {
   list(
-    mse = colMeans(res$mse),
-    hsr = colMeans(res$hsr),
     tau = colMeans(res$tau)
   )
 })
 
-plot_colors <- c(soft = "steelblue", l2 = "sienna", uniform = "darkgreen", uncertainty = "purple")
+plot_colors <- c(soft = "blue", l2 = "chocolate", uniform = "darkgreen", uncertainty = "red")
+plot_lty <- c(soft = "solid", l2 = "dashed", uniform = "dotted", uncertainty = "dotdash")
+plot_labels <- c(soft = "HSR loss optimal",
+                 l2 = "L2 loss optimal",
+                 uniform = "Uniform sampling",
+                 uncertainty = "Uncertainty sampling")
 
-plot_metric_curve <- function(metric_name, y_label, file_name) {
-  png(file.path(project_root, "real data", file_name), width = 1200, height = 800, res = 150)
-  on.exit(dev.off(), add = TRUE)
-  y_values <- sapply(strategies, function(name) strategy_means[[name]][[metric_name]])
-  start_idx <- which.min(abs(sample_sizes - (nrow(df_initial) + N_PLOT_INITIAL - 1L)))
+plot_kendall_tau <- function(start_offset, output_path = NULL) {
+  start_idx <- which.min(abs(sample_sizes - (nrow(df_initial) + start_offset - 1L)))
   if (start_idx < 1) start_idx <- 1
+  y_values <- sapply(strategies, function(name) strategy_means[[name]]$tau)
   y_slice <- y_values[start_idx:nrow(y_values), , drop = FALSE]
   x_slice <- sample_sizes[start_idx:length(sample_sizes)]
   y_min <- min(y_slice, na.rm = TRUE)
   y_max <- max(y_slice, na.rm = TRUE)
+  if (!is.null(output_path)) {
+    pdf(output_path, width = 8, height = 6)
+    on.exit(dev.off(), add = TRUE)
+  }
   plot(x_slice, y_slice[, 1], type = "l", lwd = 2, col = plot_colors[strategies[1]],
-       xlab = "Sample size", ylab = y_label, ylim = c(y_min, y_max), main = paste("Average", y_label))
+       lty = plot_lty[strategies[1]],
+       xlab = "Sample size", ylab = "Kendall's Tau correlation",
+       ylim = c(y_min, y_max), main = "Average Kendall's Tau by Strategy")
   if (length(strategies) > 1) {
     for (idx in 2:length(strategies)) {
-      lines(x_slice, y_slice[, idx], lwd = 2, col = plot_colors[strategies[idx]])
+      lines(x_slice, y_slice[, idx], lwd = 2, col = plot_colors[strategies[idx]],
+            lty = plot_lty[strategies[idx]])
     }
   }
-  legend("topright", legend = strategies, col = plot_colors[strategies], lwd = 2, bty = "n")
+  legend("bottomright", legend = plot_labels[strategies],
+         col = plot_colors[strategies], lwd = 2, lty = plot_lty[strategies], bty = "n")
 }
-
-plot_metric_curve("mse", "Mean Squared Error", "mc_average_mse.png")
-plot_metric_curve("hsr", "Soft Ranking Loss", "mc_average_soft_ranking_loss.png")
-plot_metric_curve("tau", "Kendall's Tau", "mc_average_kendall_tau.png")
-
-metric_summary_df <- do.call(rbind, lapply(strategies, function(name) {
-  data.frame(
-    strategy = name,
-    sample_size = sample_sizes,
-    mse = strategy_means[[name]]$mse,
-    soft_ranking_loss = strategy_means[[name]]$hsr,
-    kendall_tau = strategy_means[[name]]$tau,
-    stringsAsFactors = FALSE
-  )
-}))
-write.csv(metric_summary_df, file.path(project_root, "real data", "mc_average_metrics.csv"), row.names = FALSE)
 
 # Per-tournament team summaries
 summarize_teams <- function(df) {
@@ -1193,13 +1168,6 @@ overall_summary <- overall_summary[order(-overall_summary$matches), , drop = FAL
 cat("\nOverall team summary across selected tournaments (top 20):\n")
 print(head(overall_summary, 20))
 
-write.csv(match_outcomes, file.path(project_root, "real data", "selected_match_outcomes.csv"), row.names = FALSE)
-write.csv(tournament_team_summary_df, file.path(project_root, "real data", "tournament_team_summaries.csv"), row.names = FALSE)
-write.csv(overall_summary, file.path(project_root, "real data", "overall_team_summary.csv"), row.names = FALSE)
-write.csv(pair_summary_all, file.path(project_root, "real data", "pair_empirical_summary.csv"), row.names = FALSE)
-write.csv(initial_records, file.path(project_root, "real data", "initial_sample_records.csv"), row.names = FALSE)
-write.csv(df_initial, file.path(project_root, "real data", "initial_sample_design.csv"), row.names = FALSE)
-
 cat("\nFitting BTD model with heterogeneous tie parameters...\n")
 R_theta <- 8
 fit_res <- fit_btd_mle(
@@ -1238,28 +1206,5 @@ print(head(latent_scores, 20))
 cat("\nTie parameters by tournament:\n")
 print(tie_parameters)
 
-write.csv(latent_scores, file.path(project_root, "real data", "latent_team_scores.csv"), row.names = FALSE)
-write.csv(tie_parameters, file.path(project_root, "real data", "tie_parameters.csv"), row.names = FALSE)
-
-cat("\nResults written to:\n")
-cat("  - real data/selected_match_outcomes.csv\n")
-cat("  - real data/tournament_team_summaries.csv\n")
-cat("  - real data/overall_team_summary.csv\n")
-cat("  - real data/pair_empirical_summary.csv\n")
-cat("  - real data/initial_sample_records.csv\n")
-cat("  - real data/initial_sample_design.csv\n")
-cat("  - real data/latent_team_scores.csv\n")
-cat("  - real data/tie_parameters.csv\n")
-cat("  - real data/mc_average_mse.png\n")
-cat("  - real data/mc_average_soft_ranking_loss.png\n")
-cat("  - real data/mc_average_kendall_tau.png\n")
-cat("  - real data/mc_average_metrics.csv\n")
-cat("Adaptive sampling was performed ", if (WITH_REPLACEMENT) "with" else "without", " replacement.\n", sep = "")
-
-elapsed_time <- proc.time() - script_start_time
-cat("Total runtime for MC_REPS =", mc_reps, "was", elapsed_time["elapsed"], "seconds.\n")
-if (mc_reps > 0) {
-  per_rep <- elapsed_time["elapsed"] / mc_reps
-  cat("Approximate time per replicate:", per_rep, "seconds.\n")
-  cat("Estimated runtime for 1000 replicates:", per_rep * 1000, "seconds.\n")
-}
+PLOT_START_OFFSET <- 20L
+plot_kendall_tau(PLOT_START_OFFSET, file.path(project_root, "real data", "kendall_tau_soccer.pdf"))
